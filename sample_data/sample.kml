@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Sample Geospatial Dataset</name>
+    <description>
+      Sample KML containing a Point, LineString, and Polygon for testing.
+      All coordinates are in EPSG:4326 (WGS 84).
+      
+      The polygon is a 0.01° x 0.01° square near Bengaluru, India.
+      UTM Zone 43N (EPSG:32643) should be selected automatically.
+      
+      Approximate expected measurements (UTM 43N):
+        Polygon area  ≈ 1 234 000 m² (varies with latitude)
+        LineString length ≈ 1 111 m (0.01° latitude at ~77°E)
+    </description>
+
+    <!-- ===== Feature 1: Point ===== -->
+    <Placemark>
+      <name>Tower</name>
+      <description>A communication tower in Bengaluru</description>
+      <Point>
+        <coordinates>77.5946,12.9716,0</coordinates>
+      </Point>
+    </Placemark>
+
+    <!-- ===== Feature 2: LineString ===== -->
+    <Placemark>
+      <name>Road</name>
+      <description>A short road segment in Bengaluru</description>
+      <LineString>
+        <coordinates>
+          77.5946,12.9716,0
+          77.5946,12.9816,0
+        </coordinates>
+      </LineString>
+    </Placemark>
+
+    <!-- ===== Feature 3: Polygon ===== -->
+    <Placemark>
+      <name>Site A</name>
+      <description>A survey polygon near Bengaluru</description>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              77.5946,12.9716,0
+              77.6046,12.9716,0
+              77.6046,12.9816,0
+              77.5946,12.9816,0
+              77.5946,12.9716,0
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+
+  </Document>
+</kml>
