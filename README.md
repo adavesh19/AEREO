@@ -1,346 +1,202 @@
-# Geospatial File Measurement API
-
-[![CI](https://github.com/your-username/geospatial-file-measurement-api/actions/workflows/tests.yml/badge.svg)](https://github.com/your-username/geospatial-file-measurement-api/actions/workflows/tests.yml)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green.svg)](https://fastapi.tiangolo.com)
+# AEREO - Geospatial File Measurement API
 
 ## Overview
 
-The Geospatial File Measurement API is a production-quality REST backend built with **FastAPI** that accepts geospatial files, processes their vector features, performs CRS-aware coordinate transformations, and returns accurate metric measurements (area in m², length in m).
+This project was built as part of the Aereo Software Development Engineer internship assignment. 
 
-The service accepts two industry-standard formats — **KML** (used by Google Earth and field survey tools) and **Shapefile ZIPs** (the ESRI format used by virtually every GIS platform). It handles the full spectrum of geometry types: Point, LineString, Polygon, and their Multi-variants, gracefully reporting unsupported types without crashing.
+The goal was to solve a practical backend problem: take geospatial survey files uploaded by users, parse their features, handle Coordinate Reference Systems (CRS) properly, and return verified area and length measurements through a clean REST API. 
 
-Every measurement is computed in a properly projected coordinate system. The API never calculates area or length directly from latitude/longitude degrees — doing so produces values that are geometrically meaningless. Instead, it automatically selects the optimal UTM zone for the dataset and reprojects before measuring, ensuring results are accurate regardless of where on Earth the data originates.
+The service accepts KML files and ZIP archives containing Shapefiles, inspects their vector geometries, transforms geographic coordinates into appropriate metric projections, and returns structured JSON and GeoJSON-compatible responses using FastAPI.
 
-## Problem
+## What I Built
 
-Working engineers routinely need to answer basic spatial questions about uploaded survey files: _How large is this parcel? How long is this road? What CRS is this file in?_ Today, answering these questions requires a GIS desktop tool or custom scripting. This API exposes that capability as a clean HTTP interface that any application or workflow can consume.
+Here is what is implemented in the service:
 
-Key pain points addressed:
-- **Format fragmentation**: KML and Shapefile are both common but handled differently by every tool.
-- **CRS confusion**: Files arrive in geographic (degrees) or projected (metres) coordinates, and silently computing on the wrong CRS produces silent errors.
-- **Security gaps**: Naive Shapefile ZIP handling exposes applications to Zip Slip path traversal attacks.
+- **FastAPI backend**: Clean, typed REST endpoints with automatic OpenAPI documentation and structured error handling.
+- **KML & Shapefile ZIP uploads**: Handlers for single `.kml` files and `.zip` archives containing the required Shapefile components.
+- **Pyogrio-based vector file processing**: Vector I/O powered by Pyogrio and GDAL drivers for reliable layer reading.
+- **GeoPandas & Shapely integration**: High-level geospatial DataFrame operations and geometry manipulations.
+- **PyProj coordinate transformations**: Accurate transformations between geographic and projected coordinate reference systems.
+- **CRS-aware measurement engine**: Automatic detection of input CRS, centroid-based UTM zone calculation, and metric planar measurements.
+- **Polygon area**: Calculated in square metres ($m^2$) for Polygon and MultiPolygon geometries.
+- **LineString length**: Calculated in metres ($m$) for LineString and MultiLineString geometries.
+- **Point handling**: Correctly handled without measurements ($null$) since points have no length or area.
+- **GeoJSON-compatible responses**: Feature geometries returned as standard GeoJSON objects alongside attributes and measurements.
+- **Multi-layer validation**: File extension allowlists, byte-level signature checks, and upload size enforcement.
+- **Secure ZIP extraction**: Defensive path validation protecting against Zip Slip and Windows-style path traversal attacks.
+- **Automated test suite**: 123 automated unit and integration tests covering API endpoints, CRS selection, measurements, and security.
+- **Docker containerization**: Multi-stage Dockerfile and Docker Compose configuration running as an unprivileged non-root user.
 
-## Features
+## Why FastAPI
 
-- ✅ Upload KML files (Point, LineString, Polygon, Multi-variants)
-- ✅ Upload Shapefile ZIPs (with Zip Slip / path traversal protection)
-- ✅ Automatic CRS detection and UTM zone selection
-- ✅ Accurate metric measurements (area m², length m) using projected CRS
-- ✅ Full GeoJSON-compatible geometry responses
-- ✅ Clean error responses (no stack traces exposed)
-- ✅ Configurable via environment variables
-- ✅ Production-ready Dockerfile (multi-stage, non-root user)
-- ✅ OpenAPI / Swagger documentation at `/docs`
-- ✅ Health check endpoint
+I chose FastAPI for this service for several practical engineering reasons:
 
-## Tech Stack
-
-| Technology | Version | Reason |
-|---|---|---|
-| **Python** | 3.12+ | Modern typing, pattern matching, performance |
-| **FastAPI** | 0.115 | Async-native, automatic OpenAPI docs, Pydantic integration |
-| **Uvicorn** | 0.32 | ASGI server; minimal overhead |
-| **Pydantic v2** | 2.10 | Schema validation, settings management, JSON serialisation |
-| **GeoPandas** | 1.0 | High-level geospatial DataFrame operations |
-| **Shapely** | 2.0 | Geometry objects, area/length computation |
-| **PyProj** | 3.7 | CRS definitions and coordinate transformations |
-| **Pyogrio** | 0.13+ | High-performance vector file I/O with bundled GDAL (KML, Shapefile) |
-| **Pytest** | 8.3 | Test framework with fixtures and parametrize |
-| **Ruff** | 0.8 | Extremely fast linter (replaces flake8 + isort) |
-| **Black** | 24.10 | Opinionated code formatter |
-| **Docker** | — | Reproducible builds, easy deployment |
+- **Clean API design**: Modern Python type annotations keep route definitions concise and readable.
+- **Type-safe request/response models**: Pydantic v2 schemas ensure strict validation on both incoming uploads and outgoing responses.
+- **Automatic Swagger documentation**: Interactive API exploration is available out of the box at `/docs`, which makes testing endpoints straightforward.
+- **Easy testing**: FastAPI's `TestClient` integrates cleanly with `pytest`, allowing fast in-memory execution of the full request/response lifecycle.
+- **Good fit for a backend assignment**: It provides production-ready structure without the heavy boilerplate of Django or the manual wiring required in Flask.
 
 ## Architecture
 
 ```
-Client (HTTP)
-     │
-     ▼
-┌─────────────────────────────────────────────────────────┐
-│                     FastAPI App                         │
-│  POST /api/files/   GET /api/files/{id}/                │
-│  GET /api/files/{id}/measurements/   GET /health        │
-└────────────────┬────────────────────────────────────────┘
-                 │
-        ┌────────▼────────┐
-        │   Validation    │  ← extension, size, content signature
-        └────────┬────────┘    Zip Slip detection
-                 │
-        ┌────────▼────────┐
-        │  File Storage   │  ← UUID-named files in UPLOAD_DIR
-        └────────┬────────┘
-                 │
-        ┌────────▼────────┐
-        │  File Service   │  ← orchestration layer
-        │  (file_service) │
-        └────────┬────────┘
-           ┌─────┴──────┐
-           │            │
-    ┌──────▼───┐  ┌────────▼─────┐
-    │   KML    │  │  Shapefile   │
-    │  Loader  │  │  ZIP Loader  │
-    │(Pyogrio) │  │  (Pyogrio)   │
-    └──────┬───┘  └────────┬─────┘
-           └─────┬───────┘
-                 │
-        ┌────────▼────────┐
-        │   CRS Service   │  ← detect CRS → select UTM → reproject
-        └────────┬────────┘
-                 │
-        ┌────────▼────────┐
-        │  Geometry Svc   │  ← iterate rows, sanitise properties
-        └────────┬────────┘
-                 │
-        ┌────────▼────────┐
-        │ Measurement Svc │  ← area (m²) / length (m) on projected geom
-        └────────┬────────┘
-                 │
-        ┌────────▼────────┐
-        │  Metadata Store │  ← in-memory dict (UUID → metadata + features)
-        └────────┬────────┘
-                 │
-        ┌────────▼────────┐
-        │  JSON Response  │  ← Pydantic serialisation
-        └─────────────────┘
+Client
+  |
+  v
+FastAPI
+  |
+  +--> Validation
+  |
+  +--> File Processing
+  |
+  +--> GeoPandas / Pyogrio
+  |
+  +--> CRS Transformation
+  |
+  +--> Measurement Engine
+  |
+  +--> JSON / GeoJSON Response
 ```
+
+### Request Flow
+
+1. **Client Request**: The client uploads a `.kml` or `.zip` file via `POST /api/files/`.
+2. **Validation**: The upload is verified for file extension, configured size limit, and file signature. ZIP files are inspected to ensure valid Shapefile components and to prevent path traversal attacks.
+3. **Storage & Ingestion**: The file is stored locally using a unique UUID and loaded into a GeoPandas `GeoDataFrame` using Pyogrio.
+4. **CRS Transformation**: The service inspects the dataset's CRS. If geographic (such as WGS 84 / EPSG:4326), it calculates the dataset centroid and reprojects the geometries into the corresponding metric UTM zone.
+5. **Measurement Engine**: The service computes planar measurements on the projected geometries (area in $m^2$, length in $m$).
+6. **Response Generation**: The metadata and feature-level measurements are formatted according to Pydantic schemas and returned to the client as JSON.
 
 ## Project Structure
 
 ```
 geospatial-file-measurement-api/
-│
-├── app/                        ← Application package
-│   ├── main.py                 ← FastAPI app factory, startup, exception handlers
-│   ├── config.py               ← Pydantic Settings (env vars / .env)
-│   │
-│   ├── api/routes/
-│   │   └── files.py            ← POST /api/files/, GET /api/files/{id}/, measurements
-│   │
-│   ├── schemas/
-│   │   └── file.py             ← Pydantic request/response models
-│   │
+├── app/
+│   ├── main.py                 # FastAPI application factory and error handlers
+│   ├── config.py               # Pydantic Settings (environment configuration)
+│   ├── api/routes/files.py     # API route handlers for uploads, status, and measurements
+│   ├── schemas/file.py         # Request and response models (Pydantic v2)
 │   ├── services/
-│   │   ├── file_service.py     ← Upload pipeline + in-memory metadata store
-│   │   ├── geometry_service.py ← Feature extraction, property sanitisation
-│   │   ├── measurement_service.py ← area / length calculation
-│   │   └── crs_service.py      ← CRS detection, UTM selection, reprojection
-│   │
+│   │   ├── file_service.py     # Upload orchestration and metadata storage
+│   │   ├── crs_service.py      # CRS detection, UTM zone determination, reprojection
+│   │   ├── geometry_service.py # Feature iteration and GeoJSON formatting
+│   │   └── measurement_service.py # Metric planar area and length calculation
 │   └── utils/
-│       ├── validation.py       ← Extension, size, content, Zip Slip checks
-│       └── logging.py          ← Structured logging setup
-│
-├── tests/                      ← pytest test suite
-│   ├── conftest.py             ← Fixtures (programmatic test data, client)
-│   ├── test_upload.py          ← Upload endpoint tests
-│   ├── test_file_info.py       ← File info endpoint tests
-│   ├── test_measurements.py    ← Measurement service unit tests
-│   ├── test_api_measurements.py ← Measurements API integration tests
-│   ├── test_crs.py             ← CRS service unit + integration tests
-│   └── test_validation.py      ← Validation utility tests
-│
+│       ├── validation.py       # File extension, size, signature, and Zip Slip checks
+│       └── logging.py          # Structured application logging
+├── tests/                      # 123 automated pytest test cases
+│   ├── conftest.py             # Reusable test fixtures and mock geospatial data
+│   ├── test_upload.py          # Upload endpoint validation and error tests
+│   ├── test_file_info.py       # File status and health check tests
+│   ├── test_measurements.py    # Unit tests for geometry measurements
+│   ├── test_api_measurements.py # Integration tests for measurement endpoints
+│   ├── test_crs.py             # CRS selection and reprojection tests
+│   └── test_validation.py      # File validation and security checks
 ├── sample_data/
-│   ├── sample.kml              ← Point + LineString + Polygon (EPSG:4326)
-│   └── README.md
-│
-├── uploads/                    ← Runtime upload directory
-│   └── .gitkeep
-│
-├── .github/workflows/
-│   └── tests.yml               ← GitHub Actions CI (lint + test)
-│
-├── .env.example                ← Environment variable template
-├── .gitignore
-├── .dockerignore
-├── Dockerfile                  ← Multi-stage production image
-├── docker-compose.yml
-├── requirements.txt
-├── pyproject.toml              ← Ruff + Black + pytest configuration
-└── README.md
+│   └── sample.kml              # Sample KML with Point, LineString, and Polygon
+├── Dockerfile                  # Multi-stage production container definition
+├── docker-compose.yml          # Container configuration with volume persistence
+├── pyproject.toml              # Tooling configuration for pytest, ruff, and black
+└── requirements.txt            # Python dependencies
 ```
 
-## Installation
+## Supported Files
 
-### Prerequisites
+The API supports vector datasets in the following formats:
 
-- Python 3.12+
-- pip
-- System geospatial libraries (Linux/macOS) or Docker (any OS)
+1. **KML (`.kml`)**: Standard Keyhole Markup Language files containing Placemarks with Point, LineString, Polygon, MultiLineString, or MultiPolygon geometries.
+2. **Shapefile ZIP (`.zip`)**: A ZIP archive containing an ESRI Shapefile dataset. The archive must include the required components:
+   - `.shp`: Geometry data
+   - `.shx`: Shape index format
+   - `.dbf`: Attribute format
+   - `.prj`: Coordinate system description (recommended for automatic CRS detection)
 
-### Local Setup
+## API
 
-```bash
-# 1. Clone the repository
-git clone https://github.com/your-username/geospatial-file-measurement-api.git
-cd geospatial-file-measurement-api
+### Endpoints Overview
 
-# 2. Create a virtual environment
-python -m venv .venv
-
-# Windows
-.venv\Scripts\activate
-
-# Linux / macOS
-source .venv/bin/activate
-
-# 3. Install Python dependencies
-pip install -r requirements.txt
-```
-
-> **Linux / macOS only**: You may need system geospatial libraries:
-> ```bash
-> # Ubuntu / Debian
-> sudo apt-get install gdal-bin libgdal-dev libproj-dev libgeos-dev
->
-> # macOS (Homebrew)
-> brew install gdal proj geos
-> ```
-
-### Environment Configuration
-
-```bash
-# Copy the example file
-cp .env.example .env
-
-# Edit as needed (defaults are suitable for local development)
-# UPLOAD_DIR=uploads
-# MAX_UPLOAD_SIZE_MB=50
-# LOG_LEVEL=INFO
-```
-
-## Run
-
-### Development server (with auto-reload)
-
-```bash
-uvicorn app.main:app --reload
-```
-
-The API will be available at: `http://localhost:8000`
-
-### Production server
-
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
-```
-
-## Docker
-
-### Build and run
-
-```bash
-# Build
-docker build -t geospatial-api .
-
-# Run
-docker run -p 8000:8000 geospatial-api
-
-# Run with custom settings
-docker run -p 8000:8000 \
-  -e MAX_UPLOAD_SIZE_MB=100 \
-  -e LOG_LEVEL=DEBUG \
-  -v $(pwd)/uploads:/app/uploads \
-  geospatial-api
-```
-
-### Docker Compose (recommended)
-
-```bash
-# Start
-docker-compose up -d
-
-# View logs
-docker-compose logs -f api
-
-# Stop
-docker-compose down
-```
-
-## API Documentation
-
-Interactive documentation is auto-generated by FastAPI:
-
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/health` | Service health and liveness probe |
+| `POST` | `/api/files/` | Upload a KML file or Shapefile ZIP archive |
+| `GET` | `/api/files/{id}/` | Retrieve file processing status and basic metadata |
+| `GET` | `/api/files/{id}/measurements/` | Retrieve detailed feature geometries, attributes, and measurements |
 
 ---
 
 ### `GET /health`
 
-Liveness probe.
-
+**Response (`200 OK`)**:
 ```json
-{"status": "ok"}
+{
+  "status": "ok"
+}
 ```
 
 ---
 
 ### `POST /api/files/`
 
-Upload a geospatial file for processing.
+Uploads and processes a geospatial file (`multipart/form-data`).
 
-**Request** — `multipart/form-data`:
+**Example Request**:
+```bash
+curl -X POST "http://127.0.0.1:8000/api/files/" \
+  -F "file=@sample_data/sample.kml"
 ```
-file: <binary file content>
-```
 
-**Accepted formats**: `.kml`, `.zip` (containing a Shapefile)
-
-**Response** `201 Created`:
+**Example Response (`201 Created`)**:
 ```json
 {
-  "id": "a3f1b2c4-...",
-  "filename": "survey.kml",
+  "id": "656e9dab-c98a-499a-b199-2ebf9299ce74",
+  "filename": "sample.kml",
   "feature_count": 3,
   "crs": "EPSG:4326",
   "status": "COMPLETED"
 }
 ```
-
-**Error responses**:
-| Status | Reason |
-|---|---|
-| `400` | Invalid extension, corrupt file, ZIP without SHP, Zip Slip, file too large |
-| `422` | Malformed multipart request |
-| `500` | Unexpected processing error |
 
 ---
 
 ### `GET /api/files/{id}/`
 
-Retrieve file metadata by ID.
+Retrieves metadata and processing state for a previously uploaded file.
 
-**Response** `200 OK`:
+**Example Response (`200 OK`)**:
 ```json
 {
-  "id": "a3f1b2c4-...",
-  "filename": "survey.kml",
+  "id": "656e9dab-c98a-499a-b199-2ebf9299ce74",
+  "filename": "sample.kml",
   "feature_count": 3,
   "crs": "EPSG:4326",
   "status": "COMPLETED"
 }
 ```
 
-**Error**: `404 Not Found` if `id` doesn't exist.
-
 ---
 
 ### `GET /api/files/{id}/measurements/`
 
-Retrieve feature-level measurements.
+Returns the full list of features with their GeoJSON geometry, properties, original CRS, and calculated metric measurements.
 
-**Response** `200 OK`:
+**Example Response (`200 OK`)**:
 ```json
 {
-  "file_id": "a3f1b2c4-...",
-  "filename": "survey.kml",
+  "file_id": "656e9dab-c98a-499a-b199-2ebf9299ce74",
+  "filename": "sample.kml",
   "crs": "EPSG:4326",
   "features": [
     {
       "feature_id": 0,
       "geometry_type": "Point",
-      "geometry": {"type": "Point", "coordinates": [77.5946, 12.9716, 0.0]},
-      "properties": {"name": "Tower"},
+      "geometry": {
+        "type": "Point",
+        "coordinates": [77.5946, 12.9716, 0.0]
+      },
+      "properties": {
+        "Name": "Tower",
+        "description": "A communication tower in Bengaluru"
+      },
       "crs": "EPSG:4326",
       "measurement": null,
       "measurement_note": null
@@ -348,19 +204,48 @@ Retrieve feature-level measurements.
     {
       "feature_id": 1,
       "geometry_type": "LineString",
-      "geometry": {"type": "LineString", "coordinates": [[77.5946, 12.9716, 0.0], [77.5946, 12.9816, 0.0]]},
-      "properties": {"name": "Road"},
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [77.5946, 12.9716, 0.0],
+          [77.5946, 12.9816, 0.0]
+        ]
+      },
+      "properties": {
+        "Name": "Road",
+        "description": "A short road segment in Bengaluru"
+      },
       "crs": "EPSG:4326",
-      "measurement": {"length": 1111.95, "unit": "m"},
+      "measurement": {
+        "length": 1106.94,
+        "unit": "m"
+      },
       "measurement_note": null
     },
     {
       "feature_id": 2,
       "geometry_type": "Polygon",
-      "geometry": {"type": "Polygon", "coordinates": [[[77.5946, 12.9716, 0.0], ...]]},
-      "properties": {"name": "Site A"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.5946, 12.9716, 0.0],
+            [77.6046, 12.9716, 0.0],
+            [77.6046, 12.9816, 0.0],
+            [77.5946, 12.9816, 0.0],
+            [77.5946, 12.9716, 0.0]
+          ]
+        ]
+      },
+      "properties": {
+        "Name": "Site A",
+        "description": "A survey polygon near Bengaluru"
+      },
       "crs": "EPSG:4326",
-      "measurement": {"area": 1234567.89, "unit": "m²"},
+      "measurement": {
+        "area": 1201684.72,
+        "unit": "m²"
+      },
       "measurement_note": null
     }
   ]
@@ -369,172 +254,207 @@ Retrieve feature-level measurements.
 
 ## CRS Handling
 
-**CRS** (Coordinate Reference System) defines how coordinates map to locations on Earth.
+Correctly managing Coordinate Reference Systems is one of the most critical aspects of geospatial software development:
 
-### Geographic vs. Projected
+- **Angular vs. Planar Coordinates**: Latitude and longitude (such as EPSG:4326) are angular measurements expressed in decimal degrees on an ellipsoidal Earth. Calculating Euclidean distances or polygon areas directly on degree coordinates produces values that are geometrically meaningless (e.g. area in square degrees).
+- **UTM Zone Selection**: When a dataset is provided in a geographic CRS, the application computes the centroid longitude and latitude of the dataset and determines the appropriate Universal Transverse Mercator (UTM) zone:
+  $$\text{UTM Zone} = \left\lfloor \frac{\text{longitude} + 180}{6} \right\rfloor + 1$$
+  The zone number is strictly clamped to the valid range $[1, 60]$.
+- **Hemisphere Mapping**:
+  - Northern hemisphere ($\text{latitude} \ge 0$): `EPSG:326xx` (e.g. `EPSG:32643` for Bengaluru, India)
+  - Southern hemisphere ($\text{latitude} < 0$): `EPSG:327xx` (e.g. `EPSG:32756` for Sydney, Australia)
+- **Preserving Projected CRS**: If the uploaded dataset is already defined in an appropriate projected metric CRS (such as State Plane or a local UTM projection), the service preserves that coordinate system rather than forcing a redundant reprojection.
+- **Handling Missing CRS**: If a file has no CRS information, the API does not assume `EPSG:4326`. Guessing a coordinate system can lead to silent measurement errors. Instead, the service processes the file, records `"crs": null`, returns `"measurement": null` for all features, and attaches a descriptive `measurement_note` explaining that a valid CRS is required for measurement.
+- **Measurement Methodology**: All computations are performed as a **projected planar measurement** in metres or square metres on reprojected Cartesian coordinates.
 
-| Type | Example | Units | Suitable for measurement? |
-|---|---|---|---|
-| Geographic | EPSG:4326 (WGS 84) | Degrees | ❌ No |
-| Projected | EPSG:32643 (UTM 43N) | Metres | ✅ Yes |
+## Measurement Logic
 
-Computing `geometry.area` or `geometry.length` on EPSG:4326 coordinates returns values in **degrees²** or **degrees** — which are not meaningful physical measurements.
+Measurements are computed based on the geometry type after projecting geographic features into a metric coordinate system:
 
-### UTM Zone Selection
+- **Point / MultiPoint**: No measurement required (`measurement: null`, `measurement_note: null`). Points represent discrete spatial coordinates and do not have length or area.
+- **LineString**: Measured as planar length in metres ($m$).
+- **MultiLineString**: Measured as the combined total length of all line components in metres ($m$).
+- **Polygon**: Measured as planar area in square metres ($m^2$).
+- **MultiPolygon**: Measured as the combined total area of all polygon parts in square metres ($m^2$).
+- **GeometryCollection / Unsupported Types**: Returned with `measurement: null` and an explanatory `measurement_note`.
 
-The API uses the dataset centroid to automatically select the optimal UTM zone:
-
-```
-zone = int((longitude + 180) / 6) + 1
-
-Northern hemisphere:  EPSG = 32600 + zone
-Southern hemisphere:  EPSG = 32700 + zone
-```
-
-Examples:
-| Location | Lon | Lat | UTM Zone | EPSG |
-|---|---|---|---|---|
-| Bengaluru, India | 77.59 | 12.97 | 43N | 32643 |
-| London, UK | -0.12 | 51.50 | 30N | 32630 |
-| New York, USA | -73.93 | 40.73 | 18N | 32618 |
-| Sydney, Australia | 151.21 | -33.87 | 56S | 32756 |
-
-### Missing CRS
-
-If a file has no CRS information, the API:
-1. Processes and returns the file (status `COMPLETED`)
-2. Reports `"crs": null` in metadata
-3. Returns `"measurement": null` for all features
-4. Includes a `"measurement_note"` explaining why
-
-We **never silently assume EPSG:4326** — geographic interpretation without a known datum is ambiguous and leads to silent measurement errors.
-
-### Already-Projected CRS
-
-If the input file is already in a projected CRS with metre units (e.g. EPSG:32643, EPSG:27700), we use it directly without reprojection. This avoids unnecessary transformation noise.
-
-## Measurement Strategy
-
-| Geometry Type | Measurement | Unit |
-|---|---|---|
-| Point | None (null) | — |
-| MultiPoint | None (null) | — |
-| LineString | length | m |
-| MultiLineString | total length | m |
-| Polygon | area | m² |
-| MultiPolygon | total area | m² |
-| GeometryCollection | None (null + note) | — |
-
-Measurements are computed on the projected geometry and rounded to **2 decimal places** in the API response.
-
-## Error Handling
-
-| Status | Trigger | Response |
-|---|---|---|
-| `400` | Bad extension / corrupt file / no SHP in ZIP | `{"detail": "..."}` |
-| `404` | Unknown file ID | `{"detail": "File not found."}` |
-| `422` | Malformed request | FastAPI validation error |
-| `500` | Unexpected error | `{"detail": "An unexpected internal server error occurred."}` |
-
-Python stack traces are **never** returned to API callers. Full error details are logged server-side.
+All calculated measurements are rounded to 2 decimal places for clean, consistent API output.
 
 ## Security
 
-| Threat | Mitigation |
-|---|---|
-| Arbitrary file uploads | Extension whitelist (`.kml`, `.zip` only) |
-| Content spoofing | Byte-level magic-number validation |
-| Oversized uploads | Configurable `MAX_UPLOAD_SIZE_MB` limit |
-| Zip Slip / path traversal | Every ZIP member is checked for `..` and absolute paths before extraction |
-| Stack trace leakage | Global exception handler returns only generic messages |
-| Privilege escalation | Docker container runs as non-root user (UID 1001) |
+Handling user-uploaded archives and vector files requires defensive backend programming:
+
+- **Upload Size Limit**: Configured through `MAX_UPLOAD_SIZE_MB` (defaults to 50 MB) to prevent denial-of-service from oversized uploads.
+- **Extension Allowlist**: Strict check allowing only `.kml` and `.zip` extensions.
+- **Content Validation**: Byte-level header validation to confirm that files match expected XML or PK-ZIP magic numbers, preventing renamed binary uploads.
+- **ZIP File Verification**: Uploaded archives are inspected to confirm they contain valid Shapefile components (`.shp`, `.shx`, `.dbf`).
+- **Zip Slip & Path Traversal Protection**: Every archive entry is inspected before extraction. The extractor rejects paths with `..`, absolute paths, Windows drive letters (`C:`), or paths that resolve outside the designated destination folder.
+- **Safe Extraction**: Files are extracted into isolated, temporary directories created per request.
+- **Sanitized API Errors**: Generic error messages are returned to callers on internal errors to prevent internal stack traces or server paths from leaking.
+- **Non-Root Docker Execution**: The Docker container creates and runs under an unprivileged user (`appuser`, UID 1001).
+
+## Why Pyogrio Instead of Fiona
+
+During the implementation, I chose **Pyogrio** as the vector file I/O engine for GeoPandas:
+
+- **Independent Vector Engine**: Pyogrio provides direct Python bindings to the GDAL C API and integrates natively with GeoPandas (`gpd.options.io_engine = "pyogrio"`).
+- **Cleaner Deployment**: Fiona often requires separately compiled system GDAL libraries that can introduce complex C-dependency conflicts across development and container environments. Pyogrio wheels provide self-contained GDAL binaries for standard platforms.
+- **Performance**: Pyogrio reads vector datasets via Apache Arrow memory structures, significantly reducing read latency for multi-feature datasets.
+- This was an intentional architecture choice for this project to ensure consistent, stable builds across local Windows development and Linux Docker containers without sacrificing GDAL format support.
 
 ## Testing
 
-```bash
-# Run all tests
-pytest
+The codebase includes an extensive test suite built with `pytest`:
 
-# Verbose output with short tracebacks
-pytest -v --tb=short
-
-# Run a specific test file
-pytest tests/test_crs.py -v
-
-# Run a specific test class
-pytest tests/test_validation.py::TestZipContentValidation -v
+```
+======================= 123 passed, 3 warnings in 4.01s =======================
 ```
 
-Tests use **programmatically generated** geospatial fixtures (via GeoPandas + Shapely) — no binary test files are committed. Every test runs in an isolated temporary upload directory.
+The test suite covers:
+- **API Integration Tests**: Testing upload workflows, metadata retrieval, and measurement endpoints with `TestClient`.
+- **CRS Tests**: Testing UTM zone selection logic, hemisphere boundary conditions, already-projected coordinate systems, and missing CRS handling.
+- **Measurement Tests**: Unit tests verifying area and length formulas against known geometric shapes (unit squares, lines, multipart geometries).
+- **Upload Validation Tests**: Testing file size boundaries, extension allowlists, and corrupt file signatures.
+- **Security Tests**: Dedicated tests verifying that malicious ZIP archives (Zip Slip, directory traversal, drive letter absolute paths) are rejected before extraction.
 
-### Test Coverage
+## Docker
 
-| Test File | What it covers |
-|---|---|
-| `test_upload.py` | Upload endpoint, extension/size/content validation, ZipSlip, schema |
-| `test_file_info.py` | File info endpoint, 404, health check |
-| `test_measurements.py` | Measurement service units (area, length, null, unsupported, JSON) |
-| `test_api_measurements.py` | Measurements API integration (metric values, GeoJSON, CRS, missing CRS) |
-| `test_crs.py` | UTM zone selection (parametrized cities), CRS detection, projection sanity |
-| `test_validation.py` | All validation functions (extension, size, KML sig, ZIP, ZipSlip) |
+Docker support was verified locally with Docker Desktop 29.8.2.
 
-## Storage
+### Build the Image
 
-**Current implementation**: Local filesystem with UUID-named files.
+```bash
+docker build -t aereo-geospatial-api .
+```
 
-Architecture decisions that make migration straightforward:
+### Run the Container
 
-| Component | Current | Future |
-|---|---|---|
-| File storage | `uploads/<uuid>.<ext>` | S3 / GCS / Azure Blob |
-| Metadata store | In-memory dict | PostgreSQL / PostGIS |
-| Feature store | Same dict | PostGIS geometry tables |
+```bash
+docker run --rm -d --name aereo-api -p 8000:8000 aereo-geospatial-api
+```
 
-The upload and retrieval logic is isolated in `file_service.py`. Swapping `_save_file()` for an S3 `put_object()` call and `_metadata_store` for SQLAlchemy ORM calls requires changes in exactly one file.
+### Health Check
+
+```bash
+curl http://127.0.0.1:8000/health
+# Output: {"status":"ok"}
+```
+
+### API Verification Against Container
+
+```bash
+curl -X POST "http://127.0.0.1:8000/api/files/" -F "file=@sample_data/sample.kml"
+# Output: {"id":"656e9dab-c98a-499a-b199-2ebf9299ce74","filename":"sample.kml","feature_count":3,"crs":"EPSG:4326","status":"COMPLETED"}
+```
+
+### Stop the Container
+
+```bash
+docker stop aereo-api
+```
+
+### Docker Compose
+
+```bash
+docker compose up --build -d
+curl http://127.0.0.1:8000/health
+docker compose down
+```
 
 ## Design Decisions
 
-### Why FastAPI?
-FastAPI gives us automatic OpenAPI documentation, async support, and Pydantic v2 integration out of the box. For an API-first geospatial service, the self-documenting nature is particularly valuable — consumers can explore the API at `/docs` without reading external documentation.
+- **FastAPI**: Chosen for its fast asynchronous handling, automatic OpenAPI schema generation, and straightforward Pydantic models.
+- **Pyogrio**: Chosen to read both KML and Shapefile files reliably using bundled GDAL drivers without external system library headaches.
+- **GeoPandas & Shapely**: Used as the primary data abstraction for vector features and geometric operations.
+- **PyProj**: Used for coordinate transformations, ensuring mathematically accurate reprojections to metric systems.
+- **UTM Selection**: Centroid-based UTM selection provides an accurate, automated way to project single-site survey datasets without requiring manual user input.
+- **Local Storage & In-Memory Store**: Kept simple and stateless to focus on core geospatial processing without introducing unnecessary database dependencies for an internship assignment.
 
-### Why GeoPandas + Pyogrio?
-GeoPandas provides a high-level DataFrame interface over geospatial data, making it easy to iterate features, handle CRS, and batch-process geometry. Pyogrio serves as the underlying vector I/O engine:
-- **High performance**: Built on GDAL C API and Apache Arrow, reading files up to 5-10x faster than legacy backends.
-- **Self-contained binaries**: Bundles GDAL, PROJ, and GEOS in standard wheel distributions, avoiding manual C++ compilation or external system library installations across platforms (Windows, Linux, macOS).
-- **Multi-format support**: Provides full driver support for KML, LIBKML, and ESRI Shapefiles out of the box.
+## What I Learned
 
-### Why PyProj?
-PyProj wraps the PROJ library and is the de facto standard for coordinate transformations in Python. It integrates directly with GeoPandas' `to_crs()` method, making reprojection a single line.
+Building this project gave me hands-on experience solving real-world geospatial backend engineering problems:
 
-### Why UTM-based projection?
-UTM (Universal Transverse Mercator) provides excellent metric accuracy within each 6° longitude zone. For single-site survey files — the primary use case here — UTM error is well under 0.1%. It's also deterministic: any point on Earth maps to exactly one UTM zone, making the selection algorithm simple and testable.
+- **Geospatial Coordinate Systems**: I gained a much clearer understanding of why geographic coordinates (degrees) cannot be used directly for distance or area calculations, and how to programmatically select appropriate UTM projections.
+- **Working with Pyogrio & GDAL**: I learned how vector drivers discover and read layers in KML files and ESRI Shapefiles, and how to structure layer iteration cleanly.
+- **API Design with Pydantic v2**: I learned how to structure nested response schemas, discriminate between different measurement models (area vs. length vs. null), and handle serialization cleanly.
+- **Defensive File Ingestion**: Working with ZIP archives taught me about real-world security vulnerabilities like Zip Slip and how to sanitize paths across both Windows and Unix environments.
+- **Containerizing Geospatial Applications**: I learned how to construct a multi-stage Docker build that bundles the necessary C libraries for spatial data while keeping the final container lightweight and running under an unprivileged user.
 
-### Why local storage?
-For an internship assignment, a database adds complexity without value. The in-memory + local-file approach is simple, fast, and the service layer is explicitly designed for future migration (see Storage section).
+## Limitations
 
-### Why not EPSG:3857 (Web Mercator)?
-Web Mercator preserves shape but significantly distorts area at latitudes away from the equator. UTM is the correct choice for accurate area and length measurements.
+- **In-Memory Metadata Store**: File records are stored in memory for the life of the process. Restarting the server clears the file index (though files remain on disk).
+- **Synchronous File Processing**: Files are processed synchronously in the request thread, which is fine for small to medium survey files but would block the event loop for very large datasets.
+- **Single UTM Zone for Wide Datasets**: The centroid UTM projection is optimal for localized survey sites. Datasets spanning multiple UTM zones or entire continents would experience projection distortion at the edges.
 
-## Learning
+## Future Improvements
 
-Building this project involved working through several layers of geospatial engineering that aren't obvious from a Python/web background:
+If extended into a larger production system, the following enhancements would be natural next steps:
 
-**CRS and coordinate systems** were the biggest learning curve. Understanding the difference between a geographic CRS (a model of Earth's shape) and a projected CRS (a flat-map projection) — and why you cannot compute Euclidean distance on spherical coordinates — required reading through PROJ documentation and experimenting with concrete values. Seeing `geometry.area` return `0.0001` on EPSG:4326 data vs `1,234,000` on UTM data was a real "aha" moment.
+- **PostgreSQL / PostGIS**: Persist file records, geometry, and spatial indexes in a database to enable spatial queries (intersections, buffers, bounding box lookups).
+- **Background Task Processing**: Move heavy file parsing to a background worker queue (e.g. Celery or RQ) so that file uploads return immediately with a job ID.
+- **Cloud Object Storage**: Store uploaded raw files and processed artifacts in AWS S3 or Google Cloud Storage instead of the local filesystem.
+- **Authentication**: Add API key or JWT-based authentication for user access control.
+- **Support for Large Geographic Extents**: Implement custom projection selection (such as Albers Equal Area or Lambert Conformal Conic) for regional datasets spanning multiple UTM zones.
 
-**GeoPandas & Pyogrio layer model**: KML files can contain multiple layers (Placemarks, folders, etc.). Pyogrio exposes these via `pyogrio.list_layers()`, allowing the service to reliably discover and concatenate all layers into a single GeoDataFrame rather than silently reading only the first layer.
+## Running Locally
 
-**FastAPI + Pydantic v2**: Pydantic v2's breaking changes from v1 (`.dict()` → `.model_dump()`, schema generation changes) required careful attention. Using discriminated unions for the `measurement` field (which is either an AreaMeasurement, LengthMeasurement, or None) was an interesting schema design challenge.
+### Windows (PowerShell)
 
-**Secure file handling**: Zip Slip is a real vulnerability where `../../` paths in ZIP entries can overwrite arbitrary files. Implementing the two-pass defence (member path check + resolved-path containment check) required understanding how `pathlib.Path.resolve()` works on Windows vs Linux.
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
 
-## Future Scope
+Then visit:
+```
+http://127.0.0.1:8000/docs
+```
 
-- **Background processing**: Move file processing to Celery/RQ workers with a job queue, returning a job ID immediately and polling for results. This unblocks long-running large file processing.
-- **PostGIS storage**: Store extracted features in a PostGIS-enabled PostgreSQL database for spatial queries (intersections, buffer, nearest-neighbour).
-- **Cloud object storage**: Replace local file storage with S3-compatible storage for horizontal scalability and durability.
-- **Authentication**: API key or OAuth2 authentication for multi-tenant deployments.
-- **Large file streaming**: Stream uploads in chunks rather than reading the entire file into memory.
-- **Spatial indexing**: R-tree indexing via Shapely's STRtree for fast bounding-box queries over large datasets.
-- **Cloud deployment**: Kubernetes/Cloud Run deployment with auto-scaling, readiness probes, and Prometheus metrics.
-- **Monitoring**: Structured JSON logging with correlation IDs, Prometheus metrics, and OpenTelemetry tracing.
-- **Additional formats**: GeoJSON, GeoPackage (.gpkg), CSV with lat/lon columns.
+### Linux / macOS
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
+
+## Docker
+
+### Direct Docker Run
+
+```bash
+docker build -t aereo-geospatial-api .
+docker run --rm -p 8000:8000 aereo-geospatial-api
+```
+
+### Docker Compose
+
+```bash
+docker compose up --build
+```
+
+## Testing
+
+Run the full quality and verification suite:
+
+```bash
+# Run automated tests
+pytest -v
+
+# Run code linter
+ruff check .
+
+# Check code formatting
+black --check app/ tests/
+
+# Verify dependencies
+pip check
+```
+
+## GitHub
+
+Repository:
+[https://github.com/adavesh19/AEREO](https://github.com/adavesh19/AEREO)

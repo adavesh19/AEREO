@@ -6,15 +6,11 @@
 FROM python:3.12-slim AS builder
 
 # Install system-level geospatial dependencies required by Pyogrio / GDAL / PROJ
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        gdal-bin \
-        libgdal-dev \
-        libproj-dev \
-        libgeos-dev \
-        libspatialindex-dev \
-        gcc \
-        g++ \
-        build-essential \
+RUN apt-get update && apt-get install -y --no-install-recommends \        
+    libgdal36 \
+    libproj25 \
+    libgeos-c1t64 \
+    libspatialindex8 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create a virtual environment to isolate Python packages
@@ -36,10 +32,10 @@ LABEL maintainer="Adavesh" \
 
 # Runtime geospatial libraries (no compiler needed)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libgdal32 \
+        libgdal36 \
         libproj25 \
-        libgeos-c1v5 \
-        libspatialindex7 \
+        libgeos-c1t64 \
+        libspatialindex8 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy virtual environment from builder
