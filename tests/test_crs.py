@@ -70,16 +70,29 @@ class TestUtmZoneSelection:
             (151.21, -33.87, 32756),  # Sydney, Australia → UTM 56S
             (37.62, -1.29, 32737),  # Nairobi, Kenya → UTM 37S (lat<0)
             (0.0, 0.0, 32631),  # Prime meridian equator → UTM 31N
+            (180.0, 10.0, 32660),  # Dateline East (clamped to Zone 60N, not 61N)
+            (180.0, -10.0, 32760),  # Dateline East (clamped to Zone 60S, not 61S)
+            (-180.0, 10.0, 32601),  # Dateline West → UTM 1N
+            (-180.0, -10.0, 32701),  # Dateline West → UTM 1S
+            (-0.001, 10.0, 32630),  # Just west of Prime Meridian → UTM 30N
+            (0.0, 10.0, 32631),  # Exactly at Prime Meridian → UTM 31N
+            (5.999, 10.0, 32631),  # Inside zone 31 near eastern boundary → UTM 31N
+            (6.0, 10.0, 32632),  # At zone 32 boundary → UTM 32N
         ],
     )
     def test_utm_zone_selection(self, lon: float, lat: float, expected_epsg: int):
-        """UTM zone selection must map known cities to correct EPSG codes."""
+        """UTM zone selection maps cities and boundary longitudes to correct EPSG codes."""
         assert _utm_epsg_from_lonlat(lon, lat) == expected_epsg
 
     def test_bengaluru_utm_zone(self):
         """Bengaluru (77.59°E, 12.97°N) → UTM 43N → EPSG:32643."""
         epsg = _utm_epsg_from_lonlat(77.59, 12.97)
         assert epsg == 32643
+
+    def test_longitude_180_does_not_generate_zone_61(self):
+        """180.0° longitude must be clamped to zone 60 (EPSG:32660), never invalid zone 61."""
+        assert _utm_epsg_from_lonlat(180.0, 0.0) == 32660
+        assert _utm_epsg_from_lonlat(180.0, -45.0) == 32760
 
 
 class TestSelectMeasurementCrs:

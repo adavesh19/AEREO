@@ -149,6 +149,30 @@ class TestZipContentValidation:
         with pytest.raises(ValueError, match=r"[Tt]raversal|[Uu]nsafe|[Pp]ath"):
             validate_zip_content(buf.getvalue())
 
+    def test_zip_windows_style_path_traversal_raises(self):
+        """ZIP entry with Windows backslashes '..\\..\\evil.txt' should be rejected."""
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr(r"..\..\evil.txt", "payload")
+        with pytest.raises(ValueError, match=r"[Tt]raversal|[Uu]nsafe|[Pp]ath"):
+            validate_zip_content(buf.getvalue())
+
+    def test_zip_drive_letter_absolute_path_raises(self):
+        """ZIP entry starting with Windows drive letter 'C:\\' should be rejected."""
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr(r"C:\Windows\System32\evil.dll", "payload")
+        with pytest.raises(ValueError, match=r"[Tt]raversal|[Uu]nsafe|[Pp]ath"):
+            validate_zip_content(buf.getvalue())
+
+    def test_zip_nested_path_traversal_raises(self):
+        """ZIP entry with nested 'dir/sub/../../../../evil.txt' should be rejected."""
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("sub/dir/../../../../evil.txt", "payload")
+        with pytest.raises(ValueError, match=r"[Tt]raversal|[Uu]nsafe|[Pp]ath"):
+            validate_zip_content(buf.getvalue())
+
     def test_zip_absolute_path_raises(self):
         """ZIP entry with absolute path should be rejected."""
         buf = io.BytesIO()

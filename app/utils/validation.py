@@ -4,6 +4,8 @@ File and content validation utilities.
 Centralises all input-validation logic so that routes stay thin.
 """
 
+import io
+import re
 import zipfile
 from pathlib import Path
 
@@ -102,8 +104,6 @@ def validate_zip_content(content: bytes) -> None:
     if not content.startswith(_ZIP_MAGIC):
         raise ValueError("File does not appear to be a valid ZIP archive.")
 
-    import io
-
     try:
         with zipfile.ZipFile(io.BytesIO(content)) as zf:
             names = zf.namelist()
@@ -111,10 +111,17 @@ def validate_zip_content(content: bytes) -> None:
         raise ValueError(f"ZIP archive is corrupt or unreadable: {exc}") from exc
 
     # Zip Slip check – reject any entry that would escape the target directory.
+    # Handles POSIX (/), Windows (\\), drive letters (C:), and relative escapes (..).
     for name in names:
-        resolved = Path(name)
-        # A safe path must not be absolute and must not start with '..'
-        if resolved.is_absolute() or any(part == ".." for part in resolved.parts):
+        clean = name.replace("\\", "/")
+        parts = clean.split("/")
+        if (
+            clean.startswith("/")
+            or bool(re.match(r"^[a-zA-Z]:", name))
+            or any(part == ".." for part in parts)
+            or Path(name).is_absolute()
+            or any(part == ".." for part in Path(name).parts)
+        ):
             raise ValueError(
                 f"ZIP archive contains a potentially unsafe path: '{name}'. Archive rejected."
             )

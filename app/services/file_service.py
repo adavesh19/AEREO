@@ -20,6 +20,7 @@ See README § Storage for details.
 
 from __future__ import annotations
 
+import re
 import tempfile
 import uuid
 import zipfile
@@ -201,19 +202,25 @@ def _extract_zip_safe(zip_path: Path, extract_dir: Path) -> None:
     """
     try:
         with zipfile.ZipFile(zip_path) as zf:
+            resolved_extract = extract_dir.resolve()
             for member in zf.infolist():
-                member_path = Path(member.filename)
-                # Reject absolute paths and '..'-based traversal
-                if member_path.is_absolute() or any(part == ".." for part in member_path.parts):
+                clean_name = member.filename.replace("\\", "/")
+                parts = clean_name.split("/")
+                # Reject root prefix, drive letters, and '..' segments
+                if (
+                    clean_name.startswith("/")
+                    or bool(re.match(r"^[a-zA-Z]:", member.filename))
+                    or any(part == ".." for part in parts)
+                    or Path(member.filename).is_absolute()
+                    or any(part == ".." for part in Path(member.filename).parts)
+                ):
                     raise ValueError(
                         f"ZIP member '{member.filename}' contains a path traversal "
                         "sequence. Archive rejected for security reasons."
                     )
-                target = extract_dir / member_path
-                # Final double-check: resolved path must stay inside extract_dir
-                resolved_target = target.resolve()
-                resolved_extract = extract_dir.resolve()
-                if not str(resolved_target).startswith(str(resolved_extract)):
+                target = (extract_dir / clean_name).resolve()
+                # Resolved path must stay strictly inside extract_dir
+                if not target.is_relative_to(resolved_extract):
                     raise ValueError(
                         f"ZIP member '{member.filename}' would extract outside the "
                         "target directory. Archive rejected."
@@ -246,7 +253,16 @@ def _load_shapefile_zip(zip_path: Path) -> gpd.GeoDataFrame:
         if not shp_files:
             raise ValueError("ZIP archive does not contain a valid Shapefile (.shp).")
 
-        # Use the first .shp found
+        # Deterministically select primary Shapefile (sorted alphabetically by filename)
+        shp_files.sort(key=lambda p: p.name)
+        if len(shp_files) > 1:
+            logger.info(
+                "ZIP archive contains %d Shapefiles: %s. Processing primary '%s'.",
+                len(shp_files),
+                [f.name for f in shp_files],
+                shp_files[0].name,
+            )
+
         shp_path = shp_files[0]
         logger.info("Loading Shapefile from '%s'.", shp_path.name)
 
@@ -330,7 +346,8 @@ def process_upload(
     try:
         gdf = _load_geospatial_file(file_path, extension)
     except ValueError:
-        # Loading failed – mark as FAILED and re-raise for the route handler
+        # Loading failed – clean up saved file to avoid leaving corrupt data on disk
+        file_path.unlink(missing_ok=True)
         _metadata_store[file_id] = {
             "id": file_id,
             "filename": filename,
@@ -339,6 +356,9 @@ def process_upload(
             "status": FileStatus.FAILED,
             "features": [],
         }
+        raise
+    except Exception:
+        file_path.unlink(missing_ok=True)
         raise
 
     # --- CRS detection ---

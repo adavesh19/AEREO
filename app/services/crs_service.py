@@ -23,6 +23,8 @@ ambiguous, and silently guessing leads to silent measurement errors.
 
 from __future__ import annotations
 
+import math
+
 import geopandas as gpd
 from pyproj import CRS, Transformer
 
@@ -46,6 +48,12 @@ def _utm_epsg_from_lonlat(lon: float, lat: float) -> int:
     """
     Return the EPSG code for the UTM zone covering *lon*, *lat*.
 
+    Formula:
+        zone = floor((longitude + 180) / 6) + 1
+
+    Clamped to [1, 60] to ensure boundary longitudes (such as +180.0°) never
+    generate an invalid UTM zone 61.
+
     Args:
         lon: Longitude in decimal degrees (WGS 84).
         lat: Latitude in decimal degrees (WGS 84).
@@ -53,7 +61,7 @@ def _utm_epsg_from_lonlat(lon: float, lat: float) -> int:
     Returns:
         Integer EPSG code (e.g. 32643 for UTM 43N).
     """
-    zone = int((lon + 180) / 6) + 1
+    zone = math.floor((lon + 180.0) / 6.0) + 1
     # Clamp to valid UTM zone range (1-60)
     zone = max(1, min(60, zone))
     epsg = 32600 + zone if lat >= 0 else 32700 + zone
